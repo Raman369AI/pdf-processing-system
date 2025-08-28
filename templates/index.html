@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Processing System</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { background: #333; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .pending-badge { background: #ff6b35; color: white; padding: 5px 10px; border-radius: 15px; font-size: 0.9em; cursor: pointer; }
+        .section { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .pdf-item { border: 1px solid #ddd; padding: 20px; margin: 10px 0; border-radius: 8px; }
+        .pdf-item h3 { margin: 0 0 15px 0; color: #333; }
+        .fields-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin: 15px 0; }
+        .field-group { display: flex; flex-direction: column; }
+        .field-group label { font-weight: bold; color: #555; margin-bottom: 5px; }
+        .field-group input, .field-group textarea { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .field-group textarea { height: 60px; resize: vertical; }
+        .field-group input:focus, .field-group textarea:focus { outline: none; border-color: #007bff; }
+        .meta { color: #666; font-size: 0.9em; margin: 10px 0; }
+        .preview { background: #f9f9f9; padding: 10px; margin: 10px 0; border-left: 3px solid #007bff; }
+        .btn { background: #007bff; color: white; padding: 10px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; font-size: 14px; }
+        .btn:hover { background: #0056b3; }
+        .btn-success { background: #28a745; }
+        .btn-success:hover { background: #1e7e34; }
+        .btn-warning { background: #ffc107; color: #212529; }
+        .btn-warning:hover { background: #e0a800; }
+        .btn-secondary { background: #6c757d; }
+        .btn-secondary:hover { background: #5a6268; }
+        .status { padding: 5px 10px; border-radius: 3px; font-size: 0.8em; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+        .loading { text-align: center; padding: 20px; color: #666; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: #fefefe; margin: 5% auto; padding: 20px; border-radius: 8px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; }
+        .close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .close:hover { color: black; }
+        .pending-item { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .action-buttons { display: flex; gap: 10px; margin: 15px 0; }
+        .upload-area { margin-bottom: 20px; }
+        .upload-dropzone { 
+            border: 2px dashed #ddd; 
+            padding: 40px; 
+            text-align: center; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            transition: border-color 0.3s ease;
+            background: #fafafa;
+        }
+        .upload-dropzone:hover { border-color: #007bff; background: #f0f8ff; }
+        .upload-dropzone.dragover { border-color: #007bff; background: #e3f2fd; }
+        .upload-info { font-size: 0.9em; color: #666; margin: 5px 0 0 0; }
+        .upload-progress { background: #e9ecef; border-radius: 4px; margin: 10px 0; height: 20px; overflow: hidden; }
+        .upload-progress-bar { background: #007bff; height: 100%; transition: width 0.3s ease; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>PDF Processing System</h1>
+                <p>Monitor and process PDFs with dynamic field extraction</p>
+            </div>
+            <div>
+                <div class="pending-badge" onclick="showPendingOrders()" id="pending-badge">
+                    Pending: <span id="pending-count">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>PDF Upload</h2>
+            <div class="upload-area">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <input type="file" id="pdf-file" accept=".pdf" style="display: none;" onchange="handleFileSelect(this)">
+                    <div class="upload-dropzone" onclick="document.getElementById('pdf-file').click()" id="dropzone">
+                        <p>📄 Click to upload PDF or drag & drop</p>
+                        <p class="upload-info">Upload PDFs directly without affecting the automatic queue</p>
+                    </div>
+                </form>
+                <div id="upload-status"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Processed PDFs</h2>
+            <div id="processed-pdfs">
+                <div class="loading">Loading processed PDFs...</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Database Records</h2>
+            <button class="btn" onclick="loadDatabaseRecords()">Refresh Database</button>
+            <div id="database-records">
+                <div class="loading">Click refresh to load database records...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Orders Modal -->
+    <div id="pendingModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closePendingModal()">&times;</span>
+            <h2>Pending Orders</h2>
+            <div id="pending-orders-list">
+                <div class="loading">Loading pending orders...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let modelSchema = {};
+        let currentPendingOrder = null;
+
+        // Load model schema on startup
+        async function loadModelSchema() {
+            try {
+                const response = await fetch('/api/model-schema');
+                const data = await response.json();
+                modelSchema = data.fields;
+            } catch (error) {
+                console.error('Error loading model schema:', error);
+            }
+        }
+
+        function getInputType(fieldType) {
+            switch (fieldType) {
+                case 'number':
+                case 'integer':
+                    return 'number';
+                case 'string':
+                    return 'text';
+                default:
+                    return 'text';
+            }
+        }
+
+        function formatFieldName(fieldName) {
+            return fieldName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        function shouldUseTextarea(fieldName, description) {
+            const textareaFields = ['address', 'description', 'notes'];
+            return textareaFields.some(field => 
+                fieldName.toLowerCase().includes(field) || 
+                (description && description.toLowerCase().includes(field))
+            );
+        }
+
+        function generateDynamicFields(pdf, containerId) {
+            const fieldsHtml = Object.keys(modelSchema).map(fieldName => {
+                const fieldInfo = modelSchema[fieldName];
+                const value = pdf[fieldName] || fieldInfo.default || '';
+                const inputType = getInputType(fieldInfo.type);
+                const displayName = formatFieldName(fieldName);
+                
+                let inputElement = '';
+                if (shouldUseTextarea(fieldName, fieldInfo.description)) {
+                    inputElement = `
+                        <textarea id="${fieldName}_${containerId}" 
+                                  onchange="updateField('${containerId}', '${fieldName}', this.value)"
+                                  placeholder="${fieldInfo.description || ''}">${value}</textarea>
+                    `;
+                } else {
+                    let step = '';
+                    if (fieldInfo.type === 'number') {
+                        step = 'step="0.01"';
+                    }
+                    inputElement = `
+                        <input type="${inputType}" ${step}
+                               id="${fieldName}_${containerId}" 
+                               value="${value}" 
+                               onchange="updateField('${containerId}', '${fieldName}', 
+                                   ${fieldInfo.type === 'number' ? 'parseFloat(this.value) || null' : 'this.value'})"
+                               placeholder="${fieldInfo.description || ''}">
+                    `;
+                }
+
+                return `
+                    <div class="field-group">
+                        <label for="${fieldName}_${containerId}">${displayName}:</label>
+                        ${inputElement}
+                    </div>
+                `;
+            }).join('');
+
+            return fieldsHtml;
+        }
+
+        async function loadProcessedPDFs() {
+            try {
+                const response = await fetch('/api/pdfs');
+                const data = await response.json();
+                const container = document.getElementById('processed-pdfs');
+                
+                if (data.pdfs.length === 0) {
+                    container.innerHTML = '<p>No PDFs processed yet. Add PDFs to the "pdfs" folder.</p>';
+                    return;
+                }
+                
+                container.innerHTML = data.pdfs.map(pdf => `
+                    <div class="pdf-item">
+                        <h3>${pdf.filename}</h3>
+                        <div class="fields-grid">
+                            ${generateDynamicFields(pdf, pdf.filename)}
+                        </div>
+                        
+                        <div class="meta">
+                            <strong>Date Extracted:</strong> ${new Date(pdf.date_extracted).toLocaleString()}
+                        </div>
+                        <div class="preview">
+                            <strong>Content Preview:</strong><br>
+                            ${pdf.content_preview}
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn btn-success" onclick="commitToDatabase('${pdf.filename}')">
+                                Commit to Database
+                            </button>
+                            <button class="btn btn-warning" onclick="sendToPending('${pdf.filename}')">
+                                Send to Pending
+                            </button>
+                            <span id="status-${pdf.filename}"></span>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                document.getElementById('processed-pdfs').innerHTML = 
+                    '<p class="status error">Error loading processed PDFs</p>';
+            }
+        }
+
+        async function updateField(containerId, fieldName, value) {
+            try {
+                const response = await fetch(`/api/pdfs/${containerId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({[fieldName]: value})
+                });
+                
+                if (!response.ok) {
+                    console.error('Failed to update field');
+                }
+            } catch (error) {
+                console.error('Error updating field:', error);
+            }
+        }
+
+        async function commitToDatabase(filename) {
+            const statusElement = document.getElementById(`status-${filename}`);
+            statusElement.innerHTML = '<span class="status">Committing...</span>';
+            
+            try {
+                const response = await fetch(`/api/commit/${filename}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.message) {
+                    statusElement.innerHTML = '<span class="status success">✓ Committed</span>';
+                } else {
+                    statusElement.innerHTML = '<span class="status error">✗ Error</span>';
+                }
+            } catch (error) {
+                statusElement.innerHTML = '<span class="status error">✗ Network Error</span>';
+            }
+        }
+
+        async function sendToPending(filename) {
+            const statusElement = document.getElementById(`status-${filename}`);
+            statusElement.innerHTML = '<span class="status">Sending to pending...</span>';
+            
+            try {
+                const response = await fetch(`/api/pending/${filename}`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.message) {
+                    statusElement.innerHTML = '<span class="status success">✓ Sent to Pending</span>';
+                    updatePendingCount();
+                } else {
+                    statusElement.innerHTML = '<span class="status error">✗ Error</span>';
+                }
+            } catch (error) {
+                statusElement.innerHTML = '<span class="status error">✗ Network Error</span>';
+            }
+        }
+
+        async function updatePendingCount() {
+            try {
+                const response = await fetch('/api/pending/count');
+                const data = await response.json();
+                document.getElementById('pending-count').textContent = data.count;
+            } catch (error) {
+                console.error('Error updating pending count:', error);
+            }
+        }
+
+        async function showPendingOrders() {
+            document.getElementById('pendingModal').style.display = 'block';
+            
+            try {
+                const response = await fetch('/api/pending');
+                const data = await response.json();
+                const container = document.getElementById('pending-orders-list');
+                
+                if (data.orders.length === 0) {
+                    container.innerHTML = '<p>No pending orders.</p>';
+                    return;
+                }
+                
+                container.innerHTML = data.orders.map(order => {
+                    const pdfData = JSON.parse(order.pdf_data);
+                    return `
+                        <div class="pending-item">
+                            <h4>Order #${order.id} - ${pdfData.filename}</h4>
+                            <div class="fields-grid">
+                                ${generateDynamicFieldsForPending(pdfData, order.id)}
+                            </div>
+                            <div class="action-buttons">
+                                <button class="btn btn-success" onclick="updatePendingOrder(${order.id})">
+                                    Update Order
+                                </button>
+                                <span id="pending-status-${order.id}"></span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                document.getElementById('pending-orders-list').innerHTML = 
+                    '<p class="status error">Error loading pending orders</p>';
+            }
+        }
+
+        function generateDynamicFieldsForPending(pdfData, orderId) {
+            // Show only key fields for pending orders
+            const keyFields = ['invoice_number', 'customer_name', 'customer_email', 'total_amount', 'order_date'];
+            
+            return keyFields.map(fieldName => {
+                if (!modelSchema[fieldName]) return '';
+                
+                const fieldInfo = modelSchema[fieldName];
+                const value = pdfData[fieldName] || '';
+                const inputType = getInputType(fieldInfo.type);
+                const displayName = formatFieldName(fieldName);
+                
+                let step = '';
+                if (fieldInfo.type === 'number') {
+                    step = 'step="0.01"';
+                }
+                
+                return `
+                    <div class="field-group">
+                        <label>${displayName}:</label>
+                        <input type="${inputType}" ${step}
+                               id="pending_${fieldName}_${orderId}" 
+                               value="${value}">
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function updatePendingOrder(orderId) {
+            const statusElement = document.getElementById(`pending-status-${orderId}`);
+            statusElement.innerHTML = '<span class="status">Updating...</span>';
+            
+            const keyFields = ['invoice_number', 'customer_name', 'customer_email', 'total_amount', 'order_date'];
+            const updateData = {};
+            
+            keyFields.forEach(fieldName => {
+                const element = document.getElementById(`pending_${fieldName}_${orderId}`);
+                if (element) {
+                    let value = element.value;
+                    if (modelSchema[fieldName] && modelSchema[fieldName].type === 'number') {
+                        value = parseFloat(value) || null;
+                    }
+                    updateData[fieldName] = value;
+                }
+            });
+            
+            try {
+                const response = await fetch(`/api/pending/${orderId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                const data = await response.json();
+                
+                if (data.message) {
+                    statusElement.innerHTML = '<span class="status success">✓ Updated</span>';
+                } else {
+                    statusElement.innerHTML = '<span class="status error">✗ Error</span>';
+                }
+            } catch (error) {
+                statusElement.innerHTML = '<span class="status error">✗ Network Error</span>';
+            }
+        }
+
+        function closePendingModal() {
+            document.getElementById('pendingModal').style.display = 'none';
+        }
+
+        async function loadDatabaseRecords() {
+            try {
+                const response = await fetch('/api/database');
+                const data = await response.json();
+                const container = document.getElementById('database-records');
+                
+                if (data.records.length === 0) {
+                    container.innerHTML = '<p>No records in database yet.</p>';
+                    return;
+                }
+                
+                // Generate dynamic table headers based on model schema
+                const keyFields = ['filename', 'invoice_number', 'customer_name', 'total_amount', 'created_at'];
+                const headers = keyFields.map(field => formatFieldName(field)).join('</th><th>');
+                
+                container.innerHTML = `
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>${headers}</th></tr>
+                        </thead>
+                        <tbody>
+                            ${data.records.map(record => `
+                                <tr>
+                                    <td>${record.id}</td>
+                                    ${keyFields.map(field => {
+                                        let value = record[field] || '-';
+                                        if (field === 'total_amount' && value !== '-') {
+                                            value = '$' + value;
+                                        } else if (field === 'created_at' && value !== '-') {
+                                            value = new Date(value).toLocaleString();
+                                        }
+                                        return `<td>${value}</td>`;
+                                    }).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            } catch (error) {
+                document.getElementById('database-records').innerHTML = 
+                    '<p class="status error">Error loading database records</p>';
+            }
+        }
+
+        // Auto-refresh processed PDFs every 5 seconds
+        setInterval(loadProcessedPDFs, 5000);
+        
+        // Auto-refresh pending count every 10 seconds
+        setInterval(updatePendingCount, 10000);
+        
+        async function handleFileSelect(input) {
+            const file = input.files[0];
+            if (file && file.type === 'application/pdf') {
+                await uploadPDF(file);
+            } else {
+                showUploadStatus('Please select a valid PDF file', 'error');
+            }
+        }
+
+        async function uploadPDF(file) {
+            const statusDiv = document.getElementById('upload-status');
+            const dropzone = document.getElementById('dropzone');
+            
+            // Show progress
+            statusDiv.innerHTML = `
+                <div class="upload-progress">
+                    <div class="upload-progress-bar" style="width: 0%"></div>
+                </div>
+                <p>Uploading ${file.name}...</p>
+            `;
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                // Simulate progress
+                const progressBar = statusDiv.querySelector('.upload-progress-bar');
+                let progress = 0;
+                const progressInterval = setInterval(() => {
+                    progress += 10;
+                    progressBar.style.width = `${Math.min(progress, 90)}%`;
+                }, 100);
+                
+                const response = await fetch('/api/upload-pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                clearInterval(progressInterval);
+                progressBar.style.width = '100%';
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showUploadStatus(`✓ Successfully processed: ${file.name}`, 'success');
+                    // Refresh the processed PDFs list
+                    await loadProcessedPDFs();
+                } else {
+                    showUploadStatus(`✗ Error: ${result.detail}`, 'error');
+                }
+                
+            } catch (error) {
+                showUploadStatus(`✗ Upload failed: ${error.message}`, 'error');
+            }
+            
+            // Clear file input
+            document.getElementById('pdf-file').value = '';
+        }
+
+        function showUploadStatus(message, type) {
+            const statusDiv = document.getElementById('upload-status');
+            statusDiv.innerHTML = `<p class="status ${type}">${message}</p>`;
+            
+            // Clear status after 5 seconds
+            setTimeout(() => {
+                statusDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Drag and drop functionality
+        function setupDragAndDrop() {
+            const dropzone = document.getElementById('dropzone');
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, preventDefaults, false);
+                document.body.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            dropzone.addEventListener('drop', handleDrop, false);
+        }
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        function highlight(e) {
+            document.getElementById('dropzone').classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            document.getElementById('dropzone').classList.remove('dragover');
+        }
+
+        async function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type === 'application/pdf') {
+                    await uploadPDF(file);
+                } else {
+                    showUploadStatus('Please drop a valid PDF file', 'error');
+                }
+            }
+        }
+
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', async function() {
+            await loadModelSchema();
+            loadProcessedPDFs();
+            updatePendingCount();
+            setupDragAndDrop();
+        });
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('pendingModal');
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+    </script>
+</body>
+</html>
