@@ -1,11 +1,8 @@
 import os
 import asyncio
-import threading
 import re
 import uuid
-from pathlib import Path
 from datetime import datetime
-from queue import Queue
 from typing import Dict, List
 from contextlib import asynccontextmanager
 
@@ -13,18 +10,21 @@ from fastapi import FastAPI, Request, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 import PyPDF2
 import aiosqlite
 import uvicorn
+from celery import Celery
 from models import PDFExtractedData, PendingOrder, PDFDataUpdate, OrderStatus
 
-# Simple in-memory storage and queue
-pdf_queue = Queue()
-processed_pdfs = {}
+# Configuration
 PDF_FOLDER = "pdfs"
 DB_PATH = "pdf_data.db"
+REDIS_URL = "redis://localhost:6379/0"
+
+# Celery client configuration
+celery_app = Celery('pdf_processor')
+celery_app.conf.broker_url = REDIS_URL
+celery_app.conf.result_backend = REDIS_URL
 
 class DatabaseManager:
     def __init__(self, db_path: str):
@@ -149,10 +149,6 @@ class DatabaseManager:
 
 db_manager = DatabaseManager(DB_PATH)
 
-class PDFHandler(FileSystemEventHandler):
-    def on_created(self, event):
-        if event.is_file and event.src_path.endswith('.pdf'):
-            pdf_queue.put(event.src_path)
 
 def extract_pdf_fields(text: str, filename: str) -> PDFExtractedData:
     """Common field extraction logic"""
@@ -226,43 +222,15 @@ def extract_pdf_from_bytes(content: bytes, filename: str) -> PDFExtractedData:
             date_extracted=datetime.now()
         )
 
-def pdf_processor():
-    """Background thread to process PDF queue"""
-    while True:
-        try:
-            file_path = pdf_queue.get(timeout=1)
-            data = extract_pdf_data(file_path)
-            processed_pdfs[data.filename] = data
-            pdf_queue.task_done()
-        except:
-            continue
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup - only initialize database
     await db_manager.init_db()
-    
-    # Start PDF monitoring
-    event_handler = PDFHandler()
-    observer = Observer()
-    observer.schedule(event_handler, PDF_FOLDER, recursive=False)
-    observer.start()
-    
-    # Start background processor
-    processor_thread = threading.Thread(target=pdf_processor, daemon=True)
-    processor_thread.start()
-    
-    # Process existing PDFs
-    if os.path.exists(PDF_FOLDER):
-        for filename in os.listdir(PDF_FOLDER):
-            if filename.endswith('.pdf'):
-                pdf_queue.put(os.path.join(PDF_FOLDER, filename))
     
     yield
     
-    # Shutdown
-    observer.stop()
-    observer.join()
+    # Shutdown - nothing to clean up
 
 app = FastAPI(title="PDF Processing System", lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
@@ -271,9 +239,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     pending_count = await db_manager.get_pending_count()
+    # Get processed PDFs from database instead of in-memory storage
+    records = await db_manager.get_all_records()
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "processed_pdfs": processed_pdfs,
+        "processed_pdfs": {record['filename']: record for record in records},
         "pending_count": pending_count
     })
 
@@ -313,28 +283,55 @@ async def get_model_schema():
 
 @app.get("/api/pdfs")
 async def get_processed_pdfs():
-    return {"pdfs": [pdf.dict() for pdf in processed_pdfs.values()]}
+    records = await db_manager.get_all_records()
+    return {"pdfs": records}
 
 @app.post("/api/commit/{filename}")
 async def commit_to_database(filename: str):
-    if filename not in processed_pdfs:
-        return {"error": "PDF not found"}
+    # With Celery, PDFs are automatically committed to database
+    # This endpoint can now just confirm the PDF exists in database
+    records = await db_manager.get_all_records()
+    pdf_record = next((record for record in records if record['filename'] == filename), None)
     
-    data = processed_pdfs[filename]
-    success = await db_manager.insert_pdf_data(data)
-    
-    if success:
-        return {"message": "Data committed to database successfully"}
+    if pdf_record:
+        return {"message": "PDF already committed to database"}
     else:
-        return {"error": "Failed to commit data to database"}
+        return {"error": "PDF not found in database"}
 
 @app.post("/api/pending/{filename}")
 async def send_to_pending(filename: str):
-    if filename not in processed_pdfs:
+    # Find PDF in database records
+    records = await db_manager.get_all_records()
+    pdf_record = next((record for record in records if record['filename'] == filename), None)
+    
+    if not pdf_record:
         return {"error": "PDF not found"}
     
-    data = processed_pdfs[filename]
-    success = await db_manager.insert_pending_order(data)
+    # Convert database record back to PDFExtractedData
+    pdf_data = PDFExtractedData(
+        filename=pdf_record['filename'],
+        invoice_number=pdf_record.get('invoice_number'),
+        customer_name=pdf_record.get('customer_name'),
+        customer_email=pdf_record.get('customer_email'),
+        order_date=pdf_record.get('order_date'),
+        due_date=pdf_record.get('due_date'),
+        total_amount=pdf_record.get('total_amount'),
+        tax_amount=pdf_record.get('tax_amount'),
+        currency=pdf_record.get('currency'),
+        items_description=pdf_record.get('items_description'),
+        quantity=pdf_record.get('quantity'),
+        unit_price=pdf_record.get('unit_price'),
+        billing_address=pdf_record.get('billing_address'),
+        shipping_address=pdf_record.get('shipping_address'),
+        vendor_name=pdf_record.get('vendor_name'),
+        payment_terms=pdf_record.get('payment_terms'),
+        notes=pdf_record.get('notes'),
+        content_preview=pdf_record.get('content_preview'),
+        full_text=pdf_record.get('content_preview', ''),  # Use content_preview as fallback
+        date_extracted=datetime.fromisoformat(pdf_record.get('date_extracted', datetime.now().isoformat()))
+    )
+    
+    success = await db_manager.insert_pending_order(pdf_data)
     
     if success:
         return {"message": "Order sent to pending successfully"}
@@ -390,50 +387,191 @@ async def get_database_records():
 
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
-    """Upload PDF directly without affecting the queue system"""
+    """Upload PDF and submit to Celery for processing"""
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are allowed")
     
     try:
-        # Generate unique filename to avoid conflicts
-        unique_filename = f"{uuid.uuid4().hex}_{file.filename}"
-        
         # Read file content
         content = await file.read()
         
-        # Process PDF directly without saving to disk
-        pdf_data = extract_pdf_from_bytes(content, file.filename)
-        
-        # Add to processed_pdfs with original filename for user display
-        processed_pdfs[file.filename] = pdf_data
+        # Submit to Celery for processing
+        task = celery_app.send_task('process_pdf_bytes', args=[content, file.filename])
         
         return {
-            "message": "PDF uploaded and processed successfully",
+            "message": "PDF uploaded and submitted for processing",
             "filename": file.filename,
-            "data": pdf_data.dict()
+            "task_id": task.id
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
 
+@app.post("/api/upload-pdf-to-folder")
+async def upload_pdf_to_folder(file: UploadFile = File(...)):
+    """Upload PDF to monitored folder for automatic processing"""
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    
+    try:
+        # Ensure PDF folder exists
+        os.makedirs(PDF_FOLDER, exist_ok=True)
+        
+        # Generate unique filename to avoid conflicts
+        unique_filename = f"{uuid.uuid4().hex}_{file.filename}"
+        file_path = os.path.join(PDF_FOLDER, unique_filename)
+        
+        # Save file to monitored folder
+        content = await file.read()
+        with open(file_path, 'wb') as f:
+            f.write(content)
+        
+        return {
+            "message": "PDF uploaded to monitored folder for automatic processing",
+            "filename": file.filename,
+            "unique_filename": unique_filename,
+            "file_path": file_path,
+            "monitoring_info": "File will be automatically detected and processed by pdf_monitor.py"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving PDF to folder: {str(e)}")
+
+@app.get("/api/task-status/{task_id}")
+async def get_task_status(task_id: str):
+    """Get the status of a Celery task"""
+    try:
+        result = celery_app.AsyncResult(task_id)
+        
+        if result.state == 'PENDING':
+            response = {
+                'state': result.state,
+                'status': 'Task is waiting to be processed'
+            }
+        elif result.state == 'PROGRESS':
+            response = {
+                'state': result.state,
+                'status': result.info.get('status', 'Processing...'),
+                'current': result.info.get('current', 0),
+                'total': result.info.get('total', 1)
+            }
+        elif result.state == 'SUCCESS':
+            response = {
+                'state': result.state,
+                'status': 'Task completed successfully',
+                'result': result.result
+            }
+        else:
+            # Task failed
+            response = {
+                'state': result.state,
+                'status': str(result.info),
+                'error': True
+            }
+        
+        return response
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting task status: {str(e)}")
+
+@app.get("/api/processing-status/{filename}")
+async def get_processing_status(filename: str):
+    """Check if a PDF has been processed and get its status"""
+    try:
+        # Check if file exists in database
+        records = await db_manager.get_all_records()
+        pdf_record = next((record for record in records if record['filename'] == filename), None)
+        
+        if pdf_record:
+            return {
+                "status": "completed",
+                "filename": filename,
+                "processed": True,
+                "data": pdf_record,
+                "message": "PDF has been processed and stored in database"
+            }
+        else:
+            # Check if file exists in pending
+            pending = await db_manager.get_pending_orders()
+            pending_record = next((order for order in pending if filename in order['pdf_data']), None)
+            
+            if pending_record:
+                return {
+                    "status": "pending",
+                    "filename": filename,
+                    "processed": True,
+                    "message": "PDF has been processed and is in pending orders"
+                }
+            else:
+                # Check if file exists in folder (being processed or waiting)
+                file_path = os.path.join(PDF_FOLDER, filename)
+                unique_files = [f for f in os.listdir(PDF_FOLDER) if filename in f] if os.path.exists(PDF_FOLDER) else []
+                
+                if os.path.exists(file_path) or unique_files:
+                    return {
+                        "status": "processing",
+                        "filename": filename,
+                        "processed": False,
+                        "message": "PDF is being processed or waiting in queue"
+                    }
+                else:
+                    return {
+                        "status": "not_found",
+                        "filename": filename,
+                        "processed": False,
+                        "message": "PDF not found in system"
+                    }
+                    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking processing status: {str(e)}")
+
 @app.put("/api/pdfs/{filename}")
 async def update_pdf_data(filename: str, update_data: dict):
-    if filename not in processed_pdfs:
+    # Find PDF in database records
+    records = await db_manager.get_all_records()
+    pdf_record = next((record for record in records if record['filename'] == filename), None)
+    
+    if not pdf_record:
         raise HTTPException(status_code=404, detail="PDF not found")
     
-    current_data = processed_pdfs[filename]
-    current_dict = current_data.dict()
+    # Convert to dict for updating
+    current_dict = dict(pdf_record)
     
     # Update fields that are provided
     for key, value in update_data.items():
         if key in current_dict and value is not None:
             current_dict[key] = value
     
-    # Create updated PDFExtractedData
-    updated_data = PDFExtractedData(**current_dict)
-    processed_pdfs[filename] = updated_data
+    # Create updated PDFExtractedData and save to database
+    updated_data = PDFExtractedData(
+        filename=current_dict['filename'],
+        invoice_number=current_dict.get('invoice_number'),
+        customer_name=current_dict.get('customer_name'),
+        customer_email=current_dict.get('customer_email'),
+        order_date=current_dict.get('order_date'),
+        due_date=current_dict.get('due_date'),
+        total_amount=current_dict.get('total_amount'),
+        tax_amount=current_dict.get('tax_amount'),
+        currency=current_dict.get('currency'),
+        items_description=current_dict.get('items_description'),
+        quantity=current_dict.get('quantity'),
+        unit_price=current_dict.get('unit_price'),
+        billing_address=current_dict.get('billing_address'),
+        shipping_address=current_dict.get('shipping_address'),
+        vendor_name=current_dict.get('vendor_name'),
+        payment_terms=current_dict.get('payment_terms'),
+        notes=current_dict.get('notes'),
+        content_preview=current_dict.get('content_preview'),
+        full_text=current_dict.get('content_preview', ''),
+        date_extracted=datetime.fromisoformat(current_dict.get('date_extracted', datetime.now().isoformat()))
+    )
     
-    return {"message": "PDF data updated successfully", "data": updated_data.dict()}
+    success = await db_manager.insert_pdf_data(updated_data)
+    
+    if success:
+        return {"message": "PDF data updated successfully", "data": updated_data.model_dump()}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to update PDF data")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

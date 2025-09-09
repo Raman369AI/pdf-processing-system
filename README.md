@@ -1,23 +1,24 @@
 # PDF Processing System
 
-A FastAPI-based PDF processing system with dynamic field extraction, queue management, and web interface. Built for commercial use with minimal dependencies and robust architecture.
+A fault-tolerant, scalable PDF processing system built with FastAPI, Celery, and Redis. Features automatic PDF monitoring, configurable field extraction, and a dynamic web interface that adapts to your Pydantic models.
 
 ## 🚀 Features
 
 ### Core Functionality
-- **Automatic PDF Monitoring**: Watches local folder for new PDFs using Watchdog
-- **Direct PDF Upload**: Drag & drop or click to upload PDFs directly through web interface
-- **Dynamic Field Extraction**: Pydantic model-driven form generation that adapts automatically
-- **Queue Management**: Background processing queue separate from web interface
-- **Pending Orders System**: Review and modify extracted data before database commit
-- **Real-time Updates**: Live refresh of processed PDFs and pending counts
+- **Fault-Tolerant Processing**: Celery with Redis provides persistent queues and automatic retries
+- **Automatic PDF Monitoring**: Standalone service watches folder for new PDFs
+- **Direct PDF Upload**: Drag & drop interface for immediate processing
+- **Configurable Processing**: Single function to replace with your custom logic
+- **Dynamic Web Interface**: Auto-adapts to your Pydantic model changes
+- **Scalable Architecture**: Independent services can be scaled separately
 
 ### Technical Highlights
-- **FastAPI Backend**: Async Python web framework with automatic API documentation
-- **Pydantic Models**: Type-safe data validation and dynamic form generation
-- **aiosqlite Database**: Async SQLite operations with lock prevention
-- **Responsive Frontend**: Clean HTML/CSS/JavaScript interface with modal dialogs
-- **Commercial Ready**: Minimal dependencies, optimized for local deployment
+- **Separated Services**: File monitor, workers, and web app run independently
+- **Celery Task Queue**: Persistent, fault-tolerant background processing
+- **Redis Backend**: Message broker with persistence across restarts
+- **Dynamic Templates**: Jinja templates adapt to any Pydantic model
+- **Database-Centric**: All data persisted, no in-memory state
+- **Multi-Worker Safe**: Scale FastAPI and Celery workers without conflicts
 
 ### Data Extraction Fields
 - **Invoice Information**: Invoice number, dates, customer details
@@ -29,70 +30,128 @@ A FastAPI-based PDF processing system with dynamic field extraction, queue manag
 ## 📋 Prerequisites
 
 - Python 3.8+
-- Git (for repository management)
+- Redis server
 - Modern web browser
 
 ## 🛠️ Installation
 
-### 1. Clone the Repository
+### 1. Clone and Install Dependencies
 ```bash
-git clone https://github.com/Raman369AI/pdf-processing-system.git
-cd pdf-processing-system
-```
-
-### 2. Install Dependencies
-```bash
+git clone <repository>
+cd utilities
 pip install -r requirements.txt
 ```
 
-### 3. Run the Application
+### 2. Start Services (in separate terminals)
+
 ```bash
+# Terminal 1: Start Redis
+redis-server
+
+# Terminal 2: Start Celery worker
+celery -A worker worker --loglevel=info
+
+# Terminal 3: Start PDF monitor
+python pdf_monitor.py
+
+# Terminal 4: Start web application
 python main.py
 ```
 
-### 4. Access the Web Interface
+### 3. Access the Web Interface
 Open your browser and navigate to: `http://localhost:8000`
 
 ## 📁 Project Structure
 
 ```
-pdf-processing-system/
+utilities/
 │
-├── main.py                 # FastAPI application and core logic
-├── models.py               # Pydantic data models
-├── requirements.txt        # Python dependencies
-├── README.md              # This documentation
-├── LICENSE                # MIT License
+├── main.py              # FastAPI web application
+├── worker.py            # Celery worker for PDF processing
+├── pdf_monitor.py       # File system monitoring service
+├── pdf_processor.py     # Configurable PDF processing logic
+├── models.py            # Pydantic data models
+├── process_existing.py  # Utility for processing existing PDFs
+├── requirements.txt     # Python dependencies
+├── README.md           # This documentation
+├── CLAUDE.md           # Development guidance
 │
 ├── templates/
-│   └── index.html         # Web interface template
+│   └── dynamic_form.html # Auto-adapting web interface
 │
-├── static/                # Static files (CSS, JS) - auto-created
-├── pdfs/                  # PDF monitoring folder - auto-created
-│
-├── docs/                  # Additional documentation
-│   ├── API.md            # API documentation
-│   ├── DEPLOYMENT.md     # Deployment guide
-│   └── CUSTOMIZATION.md  # Customization guide
-│
-└── pdf_data.db           # SQLite database - auto-created
+├── pdfs/               # PDF input folder (auto-created)
+└── pdf_data.db         # SQLite database (auto-created)
 ```
 
-## 🔄 Usage
+## 🔧 Customizing PDF Processing
 
-### Automatic PDF Processing
+The system is designed for easy customization. Replace the processing logic in one place:
+
+### Edit `pdf_processor.py`
+
+```python
+def process_pdf_content(text: str, filename: str, model_class: Type[BaseModel]) -> BaseModel:
+    """
+    REPLACE THIS FUNCTION WITH YOUR OWN PDF PROCESSING LOGIC
+    
+    Args:
+        text: Extracted PDF text content
+        filename: Name of the PDF file  
+        model_class: Pydantic model class to instantiate
+        
+    Returns:
+        Instance of model_class with extracted data
+    """
+    
+    # Your custom processing logic here
+    data = {
+        'filename': filename,
+        'your_field': extract_your_data(text),
+        'another_field': parse_something_else(text),
+        # ... extract whatever fields your model needs
+    }
+    
+    return model_class(**data)
+```
+
+### Update Your Data Model
+
+Modify `models.py` to define your fields:
+
+```python
+from pydantic import BaseModel
+from datetime import datetime
+
+class YourDataModel(BaseModel):
+    filename: str
+    your_field: str | None = None
+    another_field: float | None = None
+    date_extracted: datetime
+    # Add any fields you need
+```
+
+The web interface **automatically adapts** to your model changes!
+
+## 🔄 Usage & Workflow Options
+
+### **Option 1: Automatic Folder Monitoring (No Manual Triggers)**
 1. **Add PDFs to Folder**: Drop PDF files into the `pdfs/` folder
-2. **Automatic Detection**: System monitors and processes files automatically
-3. **View Results**: Check the web interface for extracted data
-4. **Edit Fields**: Modify any extracted fields through dynamic forms
-5. **Commit or Send to Pending**: Choose to save to database or review later
+2. **Auto-Detection**: `pdf_monitor.py` automatically detects new files
+3. **Auto-Processing**: Celery worker processes PDF using your custom logic
+4. **Auto-Storage**: Results automatically saved to database
+5. **Zero Intervention**: Completely hands-off processing
 
-### Direct PDF Upload
-1. **Access Upload Area**: Use the upload section on the main page
-2. **Drag & Drop**: Drop PDF files directly onto the upload zone
-3. **Click to Upload**: Alternative click-to-select file option
-4. **Instant Processing**: Files processed immediately without queue
-5. **Same Workflow**: Use same edit/commit workflow as monitored files
+### **Option 2: API Upload to Monitored Folder**
+1. **API Upload**: `POST /api/upload-pdf-to-folder` with PDF file
+2. **File Saved**: PDF saved to monitored folder with unique name
+3. **Auto-Processing**: Monitor detects → Celery processes → Database storage
+4. **Status Tracking**: Use `GET /api/processing-status/{filename}` to track
+
+### **Option 3: Direct Processing Upload**
+1. **Web Upload**: Drag & drop PDFs on web interface
+2. **Direct Processing**: Files bypass folder, go straight to Celery
+3. **Task Tracking**: Use `GET /api/task-status/{task_id}` to monitor
+4. **Database Storage**: Results saved when processing completes
 
 ### Pending Orders Management
 1. **Send to Pending**: Use "Send to Pending" button for any processed PDF
@@ -103,24 +162,86 @@ pdf-processing-system/
 
 ## 🛠️ API Endpoints
 
-### Core Endpoints
-- `GET /` - Web interface
-- `GET /api/pdfs` - List all processed PDFs
-- `POST /api/upload-pdf` - Upload PDF directly
-- `PUT /api/pdfs/{filename}` - Update PDF data
+### **File Upload & Processing**
+- `POST /api/upload-pdf` - Upload PDF for direct Celery processing
+- `POST /api/upload-pdf-to-folder` - Upload PDF to monitored folder  
+- `GET /api/task-status/{task_id}` - Get Celery task status and results
+- `GET /api/processing-status/{filename}` - Check PDF processing status by filename
 
-### Database Operations
-- `POST /api/commit/{filename}` - Commit PDF to database
+### **Data Management**
+- `GET /` - Dynamic web interface (auto-adapts to your model)
+- `GET /api/pdfs` - List all processed PDFs from database
+- `PUT /api/pdfs/{filename}` - Update PDF extracted data
 - `GET /api/database` - Get all database records
 
-### Pending Orders
-- `POST /api/pending/{filename}` - Send PDF to pending
-- `GET /api/pending` - Get pending orders
-- `GET /api/pending/count` - Get pending count
-- `PUT /api/pending/{order_id}` - Update pending order
+### **Pending Orders**
+- `POST /api/commit/{filename}` - Commit PDF data to database
+- `POST /api/pending/{filename}` - Send PDF to pending orders
+- `GET /api/pending` - List all pending orders
+- `GET /api/pending/count` - Get pending orders count
+- `PUT /api/pending/{order_id}` - Update pending order data
 
-### Schema
+### **Schema & Configuration**
 - `GET /api/model-schema` - Get Pydantic model schema for dynamic forms
+
+## 📖 API Usage Examples
+
+### **Upload PDF to Monitored Folder**
+```bash
+curl -X POST -F "file=@document.pdf" \
+  http://localhost:8000/api/upload-pdf-to-folder
+```
+
+**Response:**
+```json
+{
+  "message": "PDF uploaded to monitored folder for automatic processing",
+  "filename": "document.pdf",
+  "unique_filename": "abc123_document.pdf", 
+  "file_path": "pdfs/abc123_document.pdf",
+  "monitoring_info": "File will be automatically detected and processed"
+}
+```
+
+### **Check Processing Status**
+```bash
+curl http://localhost:8000/api/processing-status/document.pdf
+```
+
+**Response:**
+```json
+{
+  "status": "completed",
+  "filename": "document.pdf",
+  "processed": true,
+  "data": { /* extracted PDF data */ },
+  "message": "PDF has been processed and stored in database"
+}
+```
+
+**Status Types:**
+- `"completed"` - Processed and stored in database
+- `"pending"` - Processed but in pending orders  
+- `"processing"` - Currently being processed
+- `"not_found"` - PDF not found in system
+
+### **Check Task Status (for direct uploads)**
+```bash
+curl http://localhost:8000/api/task-status/abc-123-task-id
+```
+
+**Response:**
+```json
+{
+  "state": "SUCCESS",
+  "status": "Task completed successfully",
+  "result": {
+    "status": "success", 
+    "filename": "document.pdf",
+    "message": "Successfully processed document.pdf"
+  }
+}
+```
 
 ## ⚙️ Configuration
 
@@ -128,10 +249,13 @@ pdf-processing-system/
 The system uses sensible defaults but can be configured via environment variables:
 
 ```bash
+# Redis Configuration
+REDIS_URL=redis://localhost:6379/0
+
 # Database
 DATABASE_URL=sqlite:///./pdf_data.db
 
-# PDF Processing
+# PDF Processing  
 PDF_FOLDER_PATH=./pdfs
 
 # Server
@@ -218,54 +342,112 @@ def extract_pdf_fields(text: str, filename: str) -> PDFExtractedData:
 - **Layout**: Adjust HTML structure in template
 - **Behavior**: Update JavaScript functions for custom interactions
 
-## 🚀 Deployment
+## 🎨 Dynamic Web Interface
 
-### Local Development
+The Jinja template system automatically adapts to your Pydantic model:
+
+- **Dynamic fields** - Form fields generated from model schema
+- **Smart input types** - Number inputs for numeric fields, text for strings  
+- **Auto-labels** - Readable field names from model definitions
+- **Responsive design** - Beautiful UI that works on any device
+
+## 🔍 How It Works
+
+### **Automatic Processing Flow**
+1. **File Detection** - `pdf_monitor.py` watches the `pdfs/` folder independently  
+2. **Task Queue** - New PDFs automatically trigger Celery tasks in Redis
+3. **Background Processing** - Worker processes PDF using your custom logic
+4. **Auto-Storage** - Results automatically saved to SQLite database
+5. **Status Tracking** - Check processing status via API endpoints
+
+### **Manual Upload Options**
+- **To Folder**: Upload via API → Saved to folder → Auto-detected → Processed
+- **Direct Processing**: Upload via API → Straight to Celery → Processed
+- **Web Interface**: Drag & drop → Direct processing → Real-time updates
+
+## 🐳 Docker Deployment
+
+Create `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+services:
+  redis:
+    image: redis:alpine
+    
+  worker:
+    build: .
+    command: celery -A worker worker --loglevel=info
+    depends_on: [redis]
+    volumes:
+      - ./pdfs:/app/pdfs
+      
+  monitor:
+    build: .
+    command: python pdf_monitor.py
+    depends_on: [redis, worker]
+    volumes:
+      - ./pdfs:/app/pdfs
+      
+  web:
+    build: .
+    command: python main.py
+    ports: ["8000:8000"]
+    depends_on: [redis]
+```
+
+## 🔍 Monitoring
+
+### Check Service Status
+
 ```bash
-python main.py
+# Check Celery workers
+celery -A worker inspect active
+
+# Check Redis connection
+redis-cli ping
+
+# Monitor logs
+tail -f /var/log/pdf-processing/*.log
 ```
 
-### Production Deployment
+### Processing Existing PDFs
+
 ```bash
-# Using Uvicorn directly
-uvicorn main:app --host 0.0.0.0 --port 8000
-
-# Using Gunicorn
-gunicorn main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+# Process all PDFs in the folder
+python process_existing.py
 ```
 
-### Docker Deployment
-```dockerfile
-FROM python:3.9-slim
+## 🚨 Troubleshooting
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+### Common Issues
 
-COPY . .
-EXPOSE 8000
+1. **Redis connection failed**
+   ```bash
+   # Start Redis server
+   redis-server
+   ```
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+2. **No Celery workers**
+   ```bash
+   # Start worker with verbose logging
+   celery -A worker worker --loglevel=debug
+   ```
 
-## 🧪 Testing
+3. **PDF not processing**
+   - Check `pdfs/` folder exists and has read permissions
+   - Verify `pdf_monitor.py` is running
+   - Check worker logs for errors
 
-### Manual Testing
-1. **Start Application**: `python main.py`
-2. **Add Test PDF**: Drop a PDF into `pdfs/` folder
-3. **Check Processing**: Verify extraction in web interface
-4. **Test Upload**: Upload PDF through web interface
-5. **Test Pending**: Send order to pending and modify
-6. **Test Database**: Commit data and check database records
+4. **Database locked**
+   - SQLite uses file locking - ensure only one process writes
+   - Check file permissions on `pdf_data.db`
 
-### Automated Testing
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
+### Logs
 
-# Run tests (when test files are added)
-pytest tests/
-```
+- **Worker logs**: Celery worker output shows processing status
+- **Monitor logs**: File system events and task submission
+- **Web logs**: HTTP requests and API responses
 
 ## 🔒 Security Considerations
 

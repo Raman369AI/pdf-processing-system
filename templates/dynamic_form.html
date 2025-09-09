@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Processing System - {{ model_schema.model_name }}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 20px;
+        }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            display: block;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        
+        .main-content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.8rem;
+            border-bottom: 3px solid #4facfe;
+            padding-bottom: 10px;
+        }
+        
+        .upload-area {
+            border: 2px dashed #4facfe;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background: #f8fbff;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .upload-area:hover {
+            border-color: #00f2fe;
+            background: #f0f8ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #00f2fe;
+            background: #e6f7ff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 3rem;
+            color: #4facfe;
+            margin-bottom: 15px;
+        }
+        
+        .upload-text {
+            font-size: 1.2rem;
+            color: #666;
+            margin-bottom: 15px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .btn {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 172, 254, 0.4);
+        }
+        
+        .btn-secondary {
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(45deg, #56ab2f 0%, #a8e6cf 100%);
+        }
+        
+        .btn-warning {
+            background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%);
+        }
+        
+        .pdf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .pdf-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            border-left: 4px solid #4facfe;
+        }
+        
+        .pdf-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .pdf-filename {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+        
+        .pdf-field {
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .pdf-field:last-child {
+            border-bottom: none;
+        }
+        
+        .field-label {
+            font-weight: 600;
+            color: #555;
+            display: inline-block;
+            width: 140px;
+            font-size: 0.9rem;
+        }
+        
+        .field-value {
+            color: #333;
+            font-size: 0.9rem;
+        }
+        
+        .pdf-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .edit-form {
+            display: none;
+            margin-top: 15px;
+        }
+        
+        .form-row {
+            margin-bottom: 15px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+            font-size: 0.9rem;
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .form-input:focus {
+            border-color: #4facfe;
+            outline: none;
+            box-shadow: 0 0 5px rgba(79, 172, 254, 0.3);
+        }
+        
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4facfe;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 5px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+        
+        .toast.show {
+            transform: translateX(0);
+        }
+        
+        .toast.error {
+            background: #f5576c;
+        }
+        
+        .toast.success {
+            background: #56ab2f;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4facfe;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+        }
+        
+        .empty-icon {
+            font-size: 4rem;
+            color: #ddd;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>PDF Processing System</h1>
+            <p>Processing {{ model_schema.model_name }} data with field extraction</p>
+            <div class="stats">
+                <div class="stat-item">
+                    <span class="stat-number" id="processedCount">{{ processed_pdfs|length }}</span>
+                    <span class="stat-label">Processed</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-number" id="pendingCount">{{ pending_count }}</span>
+                    <span class="stat-label">Pending</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <!-- Upload Section -->
+            <div class="section">
+                <h2>📁 Upload PDF</h2>
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">Drag & drop a PDF file here or click to browse</div>
+                    <button class="btn">Choose File</button>
+                    <input type="file" id="fileInput" class="file-input" accept=".pdf">
+                </div>
+                <div class="loading" id="uploadLoading">
+                    <div class="spinner"></div>
+                    <p>Processing PDF...</p>
+                </div>
+            </div>
+
+            <!-- Processed PDFs Section -->
+            <div class="section">
+                <h2>📋 Processed PDFs</h2>
+                <div id="pdfGrid" class="pdf-grid">
+                    {% if processed_pdfs %}
+                        {% for filename, pdf_data in processed_pdfs.items() %}
+                        <div class="pdf-card" data-filename="{{ filename }}">
+                            <div class="pdf-filename">{{ filename }}</div>
+                            
+                            <!-- Dynamic fields based on model schema -->
+                            {% for field_name, field_info in model_schema.fields.items() %}
+                                {% if field_name not in ['filename', 'full_text'] %}
+                                <div class="pdf-field">
+                                    <span class="field-label">{{ field_info.display_name }}:</span>
+                                    <span class="field-value">
+                                        {% if pdf_data[field_name] is not none %}
+                                            {% if field_info.type == 'number' %}
+                                                {{ "%.2f"|format(pdf_data[field_name]) }}
+                                            {% elif field_name == 'date_extracted' %}
+                                                {{ pdf_data[field_name][:19] if pdf_data[field_name] else 'N/A' }}
+                                            {% else %}
+                                                {{ pdf_data[field_name] }}
+                                            {% endif %}
+                                        {% else %}
+                                            N/A
+                                        {% endif %}
+                                    </span>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+
+                            <div class="pdf-actions">
+                                <button class="btn btn-secondary" onclick="toggleEdit('{{ filename }}')">Edit</button>
+                                <button class="btn btn-success" onclick="commitToDatabase('{{ filename }}')">Commit</button>
+                                <button class="btn btn-warning" onclick="sendToPending('{{ filename }}')">Send to Pending</button>
+                            </div>
+
+                            <!-- Dynamic edit form -->
+                            <div class="edit-form" id="editForm_{{ filename }}">
+                                {% for field_name, field_info in model_schema.fields.items() %}
+                                    {% if field_name not in ['filename', 'full_text', 'content_preview', 'date_extracted'] %}
+                                    <div class="form-row">
+                                        <label class="form-label">{{ field_info.display_name }}:</label>
+                                        <input 
+                                            type="{% if field_info.type == 'number' %}number{% elif field_info.type == 'integer' %}number{% else %}text{% endif %}" 
+                                            class="form-input" 
+                                            name="{{ field_name }}" 
+                                            value="{{ pdf_data[field_name] if pdf_data[field_name] is not none else '' }}"
+                                            {% if field_info.type == 'number' %}step="0.01"{% elif field_info.type == 'integer' %}step="1"{% endif %}
+                                        >
+                                    </div>
+                                    {% endif %}
+                                {% endfor %}
+                                <div class="pdf-actions">
+                                    <button class="btn btn-success" onclick="saveEdit('{{ filename }}')">Save</button>
+                                    <button class="btn" onclick="toggleEdit('{{ filename }}')">Cancel</button>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="empty-state">
+                            <div class="empty-icon">📁</div>
+                            <h3>No PDFs processed yet</h3>
+                            <p>Upload a PDF file to get started</p>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // File upload handling
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadLoading = document.getElementById('uploadLoading');
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+
+        async function handleFileUpload(file) {
+            if (!file.name.endsWith('.pdf')) {
+                showToast('Please select a PDF file', 'error');
+                return;
+            }
+
+            uploadLoading.style.display = 'block';
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload-pdf', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showToast('PDF uploaded and queued for processing', 'success');
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showToast(result.detail || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showToast('Upload failed: ' + error.message, 'error');
+            } finally {
+                uploadLoading.style.display = 'none';
+                fileInput.value = '';
+            }
+        }
+
+        // Edit functionality
+        function toggleEdit(filename) {
+            const editForm = document.getElementById(`editForm_${filename}`);
+            const isVisible = editForm.style.display === 'block';
+            editForm.style.display = isVisible ? 'none' : 'block';
+        }
+
+        async function saveEdit(filename) {
+            const editForm = document.getElementById(`editForm_${filename}`);
+            const formData = new FormData(editForm.querySelector('form') || editForm);
+            
+            const updateData = {};
+            editForm.querySelectorAll('.form-input').forEach(input => {
+                if (input.value.trim() !== '') {
+                    updateData[input.name] = input.type === 'number' ? parseFloat(input.value) : input.value;
+                }
+            });
+
+            try {
+                const response = await fetch(`/api/pdfs/${filename}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(updateData)
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    showToast('PDF data updated successfully', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast(result.detail || 'Update failed', 'error');
+                }
+            } catch (error) {
+                showToast('Update failed: ' + error.message, 'error');
+            }
+        }
+
+        // Action buttons
+        async function commitToDatabase(filename) {
+            try {
+                const response = await fetch(`/api/commit/${filename}`, { method: 'POST' });
+                const result = await response.json();
+                showToast(result.message || 'Committed to database', 'success');
+            } catch (error) {
+                showToast('Commit failed: ' + error.message, 'error');
+            }
+        }
+
+        async function sendToPending(filename) {
+            try {
+                const response = await fetch(`/api/pending/${filename}`, { method: 'POST' });
+                const result = await response.json();
+                showToast(result.message || 'Sent to pending', 'success');
+                document.getElementById('pendingCount').textContent = 
+                    parseInt(document.getElementById('pendingCount').textContent) + 1;
+            } catch (error) {
+                showToast('Failed to send to pending: ' + error.message, 'error');
+            }
+        }
+
+        // Toast notifications
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => toast.classList.add('show'), 100);
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => document.body.removeChild(toast), 300);
+            }, 3000);
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            fetch('/api/pdfs')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('processedCount').textContent = data.pdfs.length;
+                });
+        }, 30000);
+    </script>
+</body>
+</html>
